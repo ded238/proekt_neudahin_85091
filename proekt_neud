@@ -1,0 +1,200 @@
+import sys
+import sqlite3
+import os
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QMessageBox, QMenuBar, QTabWidget,
+    QTableWidget, QTableWidgetItem
+)
+from PyQt5.QtCore import Qt
+
+# ==========================================
+# МОДУЛЬ РАБОТЫ С БАЗОЙ ДАННЫХ (Этап 4)
+# ==========================================
+class Database:
+    def __init__(self, db_name="app_data.db"):
+        self.conn = sqlite3.connect(db_name)
+        self.cursor = self.conn.cursor()
+        # Создаем таблицу, если её нет
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        self.conn.commit()
+
+    def insert_user(self, name):
+        """Сохраняет пользователя в БД"""
+        self.cursor.execute('INSERT INTO users (name) VALUES (?)', (name,))
+        self.conn.commit()
+        return self.cursor.lastrowid
+
+    def get_all_users(self):
+        """Возвращает всех пользователей из БД"""
+        self.cursor.execute('SELECT * FROM users ORDER BY id DESC')
+        return self.cursor.fetchall()
+
+    def close(self):
+        self.conn.close()
+
+
+# ==========================================
+# ГЛАВНОЕ ОКНО ПРИЛОЖЕНИЯ (Этапы 1, 2, 3)
+# ==========================================
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.db = Database()  # Подключаем БД
+
+        # --- Настройка окна (Этап 1) ---
+        self.setWindowTitle("PyQt Desktop App - Full Project")
+        self.setGeometry(100, 100, 600, 400)
+        self.setMinimumSize(500, 300)
+
+        # --- Меню (Этап 3) ---
+        self.create_menu()
+
+        # --- Вкладки (Этап 3) ---
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+
+        # Создаем вкладки
+        self.tab_input = QWidget()
+        self.tab_data = QWidget()
+        self.tabs.addTab(self.tab_input, "Ввод данных")
+        self.tabs.addTab(self.tab_data, "Все записи")
+
+        # Наполняем вкладки
+        self.setup_input_tab()
+        self.setup_data_tab()
+
+        # --- Приветственное сообщение (Этап 3) ---
+        QMessageBox.information(self, "Добро пожаловать",
+                                "Приложение успешно запущено!\n\n"
+                                "Введите имя и нажмите 'Сохранить'.\n"
+                                "Перейдите на вкладку 'Все записи' для просмотра БД.")
+
+    # ==========================================
+    # МЕТОДЫ СОЗДАНИЯ ИНТЕРФЕЙСА
+    # ==========================================
+
+    def create_menu(self):
+        """Создает меню (Этап 3)"""
+        menu_bar = self.menuBar()
+
+        # Меню Файл
+        file_menu = menu_bar.addMenu("Файл")
+
+        exit_action = file_menu.addAction("Выход")
+        exit_action.triggered.connect(self.close)
+
+        # Меню Справка
+        help_menu = menu_bar.addMenu("Справка")
+        about_action = help_menu.addAction("О программе")
+        about_action.triggered.connect(self.show_about_dialog)
+
+    def setup_input_tab(self):
+        """Настройка вкладки ввода данных (Этапы 1, 2)"""
+        layout = QVBoxLayout()
+
+        # Метка
+        self.label = QLabel("Введите ваше имя:")
+        self.label.setStyleSheet("font-size: 14px; font-weight: bold;")
+
+        # Текстовое поле
+        self.text_field = QLineEdit()
+        self.text_field.setPlaceholderText("Напишите ваше имя здесь...")
+
+        # Кнопка
+        self.button = QPushButton("Сохранить")
+        self.button.clicked.connect(self.on_button_click)
+
+        # Добавляем виджеты в layout
+        layout.addWidget(self.label)
+        layout.addWidget(self.text_field)
+        layout.addWidget(self.button)
+        layout.addStretch()  # Добавляет отступ снизу
+
+        self.tab_input.setLayout(layout)
+
+    def setup_data_tab(self):
+        """Настройка вкладки с таблицей (Этап 3)"""
+        layout = QVBoxLayout()
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["ID", "Имя", "Дата создания"])
+        self.table.horizontalHeader().setStretchLastSection(True)
+
+        # Кнопка обновления таблицы
+        btn_refresh = QPushButton("Обновить список")
+        btn_refresh.clicked.connect(self.refresh_table)
+
+        layout.addWidget(self.table)
+        layout.addWidget(btn_refresh)
+        self.tab_data.setLayout(layout)
+
+        # Сразу заполняем таблицу
+        self.refresh_table()
+
+    # ==========================================
+    # БИЗНЕС-ЛОГИКА И ОБРАБОТКА СОБЫТИЙ (Этап 2)
+    # ==========================================
+
+    def on_button_click(self):
+        """Обработка нажатия кнопки 'Сохранить'"""
+        name = self.text_field.text().strip()
+
+        # Валидация данных
+        if not name:
+            QMessageBox.warning(self, "Ошибка", "Имя не может быть пустым!")
+            return
+
+        # Сохраняем в БД
+        try:
+            user_id = self.db.insert_user(name)
+            self.label.setText(f"Пользователь '{name}' сохранён (ID: {user_id})")
+            self.text_field.clear()
+
+            # Обновляем таблицу (если она открыта)
+            if self.tabs.currentIndex() == 1:
+                self.refresh_table()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка БД", f"Не удалось сохранить: {str(e)}")
+
+    def refresh_table(self):
+        """Обновляет таблицу данными из БД"""
+        users = self.db.get_all_users()
+
+        self.table.setRowCount(len(users))
+        for row, user in enumerate(users):
+            for col, value in enumerate(user):
+                item = QTableWidgetItem(str(value))
+                self.table.setItem(row, col, item)
+
+    def show_about_dialog(self):
+        """Показывает диалоговое окно 'О программе' (Этап 3)"""
+        QMessageBox.about(self, "О программе",
+                          "Полное десктопное приложение на PyQt5.\n"
+                          "Версия 1.0\n\n"
+                          "Технологии: PyQt5, SQLite, PyInstaller")
+
+    def closeEvent(self, event):
+        """Обработка закрытия окна (корректное закрытие БД)"""
+        self.db.close()
+        event.accept()
+
+
+# ==========================================
+# ЗАПУСК ПРИЛОЖЕНИЯ
+# ==========================================
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    from PyQt5.QtWidgets import QStyleFactory
+    app.setStyle("Fusion")
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
